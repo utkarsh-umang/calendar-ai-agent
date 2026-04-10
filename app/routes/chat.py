@@ -1,0 +1,36 @@
+from fastapi import APIRouter, Request
+from fastapi.responses import JSONResponse
+from jose import jwt, JWTError
+from pydantic import BaseModel
+
+from app.config import settings
+
+router = APIRouter()
+
+
+class ChatRequest(BaseModel):
+    message: str
+    session_id: str = "default"
+
+
+def get_user_from_cookie(request: Request) -> dict | None:
+    session = request.cookies.get("session")
+    if not session:
+        return None
+    try:
+        return jwt.decode(session, settings.SECRET_KEY, algorithms=["HS256"])
+    except JWTError:
+        return None
+
+
+@router.post("/chat")
+async def chat(request: Request, body: ChatRequest):
+    user = get_user_from_cookie(request)
+    if not user:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    # Phase 1 stub — agent will be wired in Phase 3
+    return JSONResponse({
+        "response": f"Agent not connected yet. You said: {body.message}",
+        "session_id": body.session_id,
+    })
