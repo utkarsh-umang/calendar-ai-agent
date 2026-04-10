@@ -1,4 +1,5 @@
 from app.db.mongo import db
+from langchain_core.tools import tool
 
 
 def build_memory_tools(user_id: str) -> list:
@@ -6,7 +7,6 @@ def build_memory_tools(user_id: str) -> list:
     Create memory tools bound to user_id via closure.
     These let the agent persist what it learns about the user.
     """
-    from langchain_core.tools import tool
 
     @tool
     async def save_constraint(constraint: str) -> str:

@@ -9,6 +9,7 @@ from googleapiclient.discovery import build
 
 from app.config import settings
 from app.db.mongo import db
+from langchain_core.tools import tool
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -75,7 +76,6 @@ def build_calendar_tools(user_id: str) -> list:
     Create all calendar tools as closures bound to user_id.
     This way the LLM never needs to pass user_id — it's captured automatically.
     """
-    from langchain_core.tools import tool
 
     @tool
     async def list_events(start: str, end: str) -> str:
