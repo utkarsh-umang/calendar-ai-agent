@@ -7,6 +7,7 @@ from jose import jwt, JWTError
 
 from app.config import settings
 from app.db.mongo import db
+from app.routes.chat import get_user_from_cookie
 
 router = APIRouter()
 
@@ -130,3 +131,24 @@ async def logout():
     response = RedirectResponse(url="/")
     response.delete_cookie("session")
     return response
+
+
+@router.get("/avatar")
+async def avatar(request: Request):
+    user = get_user_from_cookie(request)  
+    if not user:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+    
+    db_user = await db.users.find_one({"user_id": user["user_id"]})
+    picture_url = db_user.get("picture", "")
+    if not picture_url:
+        return JSONResponse({"error": "No avatar"}, status_code=404)
+    
+    async with httpx.AsyncClient() as client:
+        resp = await client.get(picture_url)
+    
+    from fastapi.responses import Response as FastAPIResponse
+    return FastAPIResponse(
+        content=resp.content,
+        media_type=resp.headers.get("content-type", "image/jpeg")
+    )

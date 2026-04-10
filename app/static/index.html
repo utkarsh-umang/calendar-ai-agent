@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <link rel="icon" type="image/png" href="favicon.png" />
   <title>Calendar Agent</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -236,7 +237,7 @@
         document.getElementById('login-view').style.display = 'none';
         document.getElementById('chat-view').style.display = 'flex';
         document.getElementById('user-info').innerHTML = `
-          ${data.picture ? `<img src="${data.picture}" alt="avatar"/>` : ''}
+          ${data.picture ? `<img src="/auth/avatar" alt="avatar"/>` : ''}
           <span>${data.name || data.email}</span>
         `;
       } else {
