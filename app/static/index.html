@@ -114,6 +114,18 @@
 
     #logout-btn:hover { background: #f5f5f5; color: #333; }
 
+    #new-chat-btn {
+      font-size: 13px;
+      color: #fff;
+      background: #111;
+      border: none;
+      cursor: pointer;
+      padding: 6px 12px;
+      border-radius: 6px;
+    }
+
+    #new-chat-btn:hover { background: #333; }
+
     #messages {
       flex: 1;
       overflow-y: auto;
@@ -207,6 +219,7 @@
       <span class="title">Calendar Agent</span>
       <div style="display:flex;align-items:center;gap:12px">
         <div id="user-info"></div>
+        <button id="new-chat-btn" onclick="newConversation()">New conversation</button>
         <button id="logout-btn" onclick="window.location='/auth/logout'">Logout</button>
       </div>
     </div>
@@ -227,13 +240,18 @@
   </div>
 
   <script>
-    let sessionId = crypto.randomUUID();
+    let sessionId = localStorage.getItem('session_id');
+    if (!sessionId) {
+      sessionId = crypto.randomUUID();
+      localStorage.setItem('session_id', sessionId);
+    }
 
     async function checkAuth() {
       const res = await fetch('/auth/me', { credentials: 'include' });
       const data = await res.json();
 
       if (data.authenticated) {
+        await loadHistory();
         document.getElementById('login-view').style.display = 'none';
         document.getElementById('chat-view').style.display = 'flex';
         document.getElementById('user-info').innerHTML = `
@@ -292,6 +310,29 @@
     document.getElementById('msg-input').addEventListener('keydown', (e) => {
       if (e.key === 'Enter') sendMessage();
     });
+
+    async function loadHistory() {
+      try {
+        const res = await fetch(`/chat/history?session_id=${sessionId}`, { credentials: 'include' });
+        const data = await res.json();
+        if (data.messages && data.messages.length > 0) {
+          const messages = document.getElementById('messages');
+          messages.innerHTML = '';
+          data.messages.forEach(msg => {
+            appendMessage(msg.content, msg.role === 'human' ? 'user' : 'agent');
+          });
+        }
+      } catch (err) {
+        console.error('Failed to load history', err);
+      }
+    }
+
+    function newConversation() {
+      sessionId = crypto.randomUUID();
+      localStorage.setItem('session_id', sessionId);
+      const messages = document.getElementById('messages');
+      messages.innerHTML = '<div class="message agent">New conversation started. How can I help?</div>';
+    }
 
     checkAuth();
   </script>

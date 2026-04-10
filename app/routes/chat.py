@@ -5,6 +5,7 @@ from pydantic import BaseModel
 
 from app.config import settings
 from app.agent.graph import run_agent
+from app.db.mongo import db
 
 router = APIRouter()
 
@@ -40,3 +41,18 @@ async def chat(request: Request, body: ChatRequest):
 
     except Exception as e:
         return JSONResponse({"error": f"Agent error: {str(e)}"}, status_code=500)
+
+
+@router.get("/chat/history")
+async def get_history(request: Request, session_id: str):
+    user = get_user_from_cookie(request)
+    if not user:
+        return JSONResponse({"error": "Not authenticated"}, status_code=401)
+
+    doc = await db.conversations.find_one({
+        "user_id": user["user_id"],
+        "session_id": session_id,
+    })
+
+    messages = doc.get("messages", []) if doc else []
+    return JSONResponse({"messages": messages})
