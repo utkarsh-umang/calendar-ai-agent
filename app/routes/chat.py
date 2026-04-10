@@ -4,6 +4,7 @@ from jose import jwt, JWTError
 from pydantic import BaseModel
 
 from app.config import settings
+from app.agent.graph import run_agent
 
 router = APIRouter()
 
@@ -29,8 +30,13 @@ async def chat(request: Request, body: ChatRequest):
     if not user:
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
 
-    # Phase 1 stub — agent will be wired in Phase 3
-    return JSONResponse({
-        "response": f"Agent not connected yet. You said: {body.message}",
-        "session_id": body.session_id,
-    })
+    try:
+        response = await run_agent(
+            user_id=user["user_id"],
+            session_id=body.session_id,
+            message=body.message,
+        )
+        return JSONResponse({"response": response, "session_id": body.session_id})
+
+    except Exception as e:
+        return JSONResponse({"error": f"Agent error: {str(e)}"}, status_code=500)
