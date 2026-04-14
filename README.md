@@ -232,6 +232,8 @@ LANGFUSE_HOST           → https://cloud.langfuse.com
 
 - **Tool call count validation** — the current `tool_called` scorer only checks whether the expected tool was invoked, not whether the agent called the right number of tools. A scorer that asserts an exact tool call sequence (e.g. `check_freebusy` then `create_event`, nothing more) would catch over-calling and under-calling bugs that the current eval misses.
 
+- **Token cost and latency tracking in eval** — the eval report currently only captures PASS/FAIL per test case. It should also record total token usage and end-to-end latency for each run. This makes regressions in efficiency visible alongside correctness regressions — a prompt change that improves accuracy but doubles token cost or p95 latency is not a neutral change, and the eval report should surface that trade-off explicitly.
+
 ### Reliability and scaling
 
 - **Rate limiting** — two layers are missing. At the application layer, `slowapi` middleware on the `/chat` endpoint would cap requests per user (e.g. 10/minute), preventing abuse before the agent even starts. At the LLM layer, routing OpenAI calls through a [LiteLLM](https://github.com/BerriAI/litellm) proxy would add per-user TPM/RPM caps, hard budget limits, and automatic fallback to a secondary model if the primary is rate-limited or unavailable.
@@ -241,5 +243,7 @@ LANGFUSE_HOST           → https://cloud.langfuse.com
 - **Availability consent model** — users should control who can check their freebusy, similar to Google Calendar's sharing settings.
 
 ### Observability
+
+- **Token cost and latency monitoring** — Langfuse already captures per-trace token counts and latencies. In production these should be aggregated into active dashboards tracking cost-per-user, p95 response latency, and token spend over time — with alerts for anomalies (e.g. a single user consuming 10× their normal tokens, or latency spiking above an SLA threshold). This turns Langfuse data from passive logs into actionable signals.
 
 - **Application-level logging** — Langfuse covers LLM-layer observability (traces, token costs, tool calls) but not business-level telemetry. A dedicated logging module writing structured events (user activity, tool error rates, latencies) to a `logs` MongoDB collection, paired with a dashboard (Metabase or Grafana), would give full platform visibility. Langfuse trace IDs can be cross-referenced in every log document so both systems stay linked.
