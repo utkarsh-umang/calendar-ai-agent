@@ -93,6 +93,25 @@ _TOOL_NAMES = [
 ]
 
 
+def _status_code(exc: Exception) -> int | None:
+    """Extract HTTP status code from a Langfuse exception regardless of its type."""
+    if isinstance(exc, LangfuseApiError):
+        return exc.status_code
+    # Fern client may also raise plain exceptions — parse the string representation
+    # which always has the form "status_code: NNN, body: ..."
+    msg = str(exc)
+    if msg.startswith("status_code:"):
+        try:
+            return int(msg.split("status_code:")[1].split(",")[0].strip())
+        except (ValueError, IndexError):
+            pass
+    return None
+
+
+def _is_retriable(exc: Exception) -> bool:
+    return _status_code(exc) in _RETRIABLE_STATUS_CODES
+
+
 async def get_tools_called(
     user_id: str,
     session_id: str,
@@ -123,9 +142,9 @@ async def get_tools_called(
 
             try:
                 traces = lf.client.trace.list(session_id=session_id).data
-            except LangfuseApiError as e:
-                if e.status_code in _RETRIABLE_STATUS_CODES and attempt < max_attempts:
-                    print(f"    Langfuse {e.status_code}, retrying in {delay * 2:.0f}s... (attempt {attempt}/{max_attempts})")
+            except Exception as e:
+                if _is_retriable(e) and attempt < max_attempts:
+                    print(f"    Langfuse error ({_status_code(e)}), retrying in {delay * 2:.0f}s... (attempt {attempt}/{max_attempts})")
                     delay *= 2
                     continue
                 raise
@@ -140,9 +159,9 @@ async def get_tools_called(
             for trace in traces:
                 try:
                     observations = lf.client.observations.get_many(trace_id=trace.id).data
-                except LangfuseApiError as e:
-                    if e.status_code in _RETRIABLE_STATUS_CODES and attempt < max_attempts:
-                        print(f"    Langfuse {e.status_code} fetching observations, retrying in {delay * 2:.0f}s... (attempt {attempt}/{max_attempts})")
+                except Exception as e:
+                    if _is_retriable(e) and attempt < max_attempts:
+                        print(f"    Langfuse error ({_status_code(e)}) fetching observations, retrying in {delay * 2:.0f}s... (attempt {attempt}/{max_attempts})")
                         delay *= 2
                         tools = []
                         break

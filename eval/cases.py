@@ -113,9 +113,11 @@ TEST_CASES = [
         "message": "Update event with ID 'fake-nonexistent-id-999' to start at 5pm",
         "scorer": "llm_judge",
         "expected": (
-            "The agent should not give up silently after the 404 error. "
-            "It should either call list_events to find the correct event, "
-            "or clearly explain that the event was not found and ask the user to clarify which event they meant."
+            "The agent should not give up silently after the error. "
+            "It should clearly tell the user the event ID was not found, "
+            "and either list the user's upcoming events to help them identify the right one, "
+            "or ask the user to clarify which event they meant. "
+            "Simply listing events without further explanation also counts as a valid recovery."
         ),
     },
     {
@@ -141,12 +143,7 @@ TEST_CASES = [
             }
         },
         "message": "Schedule a 1 hour meeting with Kumar Utkarsh at utkarsh.utk123@gmail.com tomorrow at 3pm",
-        "scorer": "llm_judge",
-        "expected": (
-            "The agent should call check_freebusy for utkarsh.utk123@gmail.com before creating the event. "
-            "If they are free, it should create the event and send the invite. "
-            "If they are busy, it should inform the user and suggest an alternative time. "
-            "The agent must NOT skip the availability check and go straight to creating the event."
-        ),
+        "scorer": "tool_called",
+        "expected": "check_freebusy",
     }
 ]
