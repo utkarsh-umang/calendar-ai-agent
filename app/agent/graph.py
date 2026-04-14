@@ -22,6 +22,7 @@ class AgentState(TypedDict):
     messages: Annotated[list[BaseMessage], add_messages]
     user_id: str
     session_id: str
+    tool_call_count: int  # tracks iterations to prevent infinite loops
 
 
 # ── System prompt ──────────────────────────────────────────────────────────────
@@ -40,11 +41,23 @@ You can:
 RULES:
 1. Always apply hard rules without exception. If the user says never before 10am, never suggest 9am.
 2. When the user states a new preference or constraint, immediately save it with the memory tools.
-3. When a message contains both a person's name and their email address, you MUST call save_contact BEFORE doing anything else — even before creating an event.
+3. When a message contains both a person's name and their email address, you MUST call \
+save_contact BEFORE doing anything else — even before creating an event.
 4. When creating events, use known contact emails automatically — don't ask for them again.
 5. After completing an action, confirm what you did clearly and concisely.
 6. If you cannot complete something, explain why and suggest an alternative.
+
+ERROR HANDLING AND SELF-CORRECTION:
+- If a tool returns an error starting with "Error:", read it carefully before retrying.
+- "Event not found" → call list_events first to find the correct event ID, then retry.
+- "Could not parse the dates" → reformat the date more explicitly and retry.
+- "Authentication error" or "Permission denied" → stop and inform the user, do not retry.
+- "temporarily unavailable" → inform the user the service is down and to try again shortly.
+- Never retry the exact same failed call more than once without changing something.
 """
+
+# Maximum tool call iterations per request — prevents infinite loops
+MAX_TOOL_ITERATIONS = 10
 
 
 # ── Graph factory ──────────────────────────────────────────────────────────────
@@ -89,19 +102,29 @@ async def create_agent_graph(user_id: str):
         Otherwise we're done — go to END.
         """
         last = state["messages"][-1]
+        # hard stop — prevents infinite tool call loops
+        if state.get("tool_call_count", 0) >= MAX_TOOL_ITERATIONS:
+            return "end"
+        
         if hasattr(last, "tool_calls") and last.tool_calls:
             return "tools"
         return "end"
 
-    # ── Build graph ────────────────────────────────────────────────────────────
-
-    # ToolNode is a built-in LangGraph node that executes tool calls
-    # it reads the tool_calls from the last message and runs the matching function
-    tool_node = ToolNode(all_tools)
+    async def tools_node_with_count(state: AgentState) -> dict:
+        """
+        Wraps the built-in ToolNode to increment the iteration counter.
+        This is how we track how many tool calls have happened.
+        """
+        tool_node = ToolNode(all_tools)
+        result = await tool_node.ainvoke(state)
+        return {
+            **result,
+            "tool_call_count": state.get("tool_call_count", 0) + 1,
+        }
 
     graph = StateGraph(AgentState)
     graph.add_node("agent", agent_node)
-    graph.add_node("tools", tool_node)
+    graph.add_node("tools", tools_node_with_count)
 
     graph.set_entry_point("agent")
 
@@ -130,7 +153,7 @@ async def run_agent(user_id: str, session_id: str, message: str) -> str:
     langfuse_handler = CallbackHandler(
         public_key=settings.LANGFUSE_PUBLIC_KEY,
         secret_key=settings.LANGFUSE_SECRET_KEY,
-        host=settings.LANGFUSE_BASE_URL,
+        host=settings.LANGFUSE_HOST,
         session_id=session_id,
         user_id=user_id,
     )
@@ -145,6 +168,7 @@ async def run_agent(user_id: str, session_id: str, message: str) -> str:
             "messages": history + [HumanMessage(content=message)],
             "user_id": user_id,
             "session_id": session_id,
+            "tool_call_count": 0,
         },
         config={"callbacks": [langfuse_handler]},
     )

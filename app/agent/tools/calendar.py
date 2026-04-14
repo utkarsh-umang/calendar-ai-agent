@@ -6,10 +6,67 @@ import dateparser
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+from langchain_core.tools import tool
 
 from app.config import settings
 from app.db.mongo import db
-from langchain_core.tools import tool
+
+
+# ── Retry config ───────────────────────────────────────────────────────────────
+
+RETRYABLE_STATUS_CODES = {429, 500, 502, 503, 504}
+MAX_RETRIES = 3
+BASE_DELAY = 1.0
+
+
+async def call_with_retry(fn):
+    """
+    Execute a Google API call with exponential backoff.
+
+    Retryable:  429 (rate limit), 5xx (transient server errors)
+    Not retried: 401 (auth expired), 403 (permission), 404 (not found)
+    These are permanent — retrying won't help, and we return rich messages
+    so the LLM knows how to self-correct.
+    """
+    delay = BASE_DELAY
+    last_error = None
+
+    for attempt in range(1, MAX_RETRIES + 1):
+        try:
+            return await asyncio.to_thread(fn)
+        except HttpError as e:
+            status = e.resp.status
+            last_error = e
+
+            if status == 401:
+                raise ValueError(
+                    "Authentication error — your Google Calendar access has expired. "
+                    "Please log out and log back in to reconnect your calendar."
+                )
+            elif status == 403:
+                raise PermissionError(
+                    "Permission denied — the app does not have access to perform this action."
+                )
+            elif status == 404:
+                raise LookupError(
+                    "Event not found — the event ID may be incorrect or already deleted. "
+                    "Use list_events first to get the correct event ID."
+                )
+            elif status in RETRYABLE_STATUS_CODES:
+                if attempt < MAX_RETRIES:
+                    await asyncio.sleep(delay)
+                    delay *= 2
+                    continue
+                else:
+                    raise RuntimeError(
+                        f"Google Calendar API temporarily unavailable (status {status}). "
+                        f"Tried {MAX_RETRIES} times. Please try again in a moment."
+                    )
+            else:
+                raise RuntimeError(f"Google Calendar API error (status {status}): {str(e)}")
+
+    raise RuntimeError(f"Request failed after {MAX_RETRIES} attempts: {str(last_error)}")
 
 
 # ── Helpers ────────────────────────────────────────────────────────────────────
@@ -33,15 +90,20 @@ async def get_calendar_service(user_id: str):
     )
 
     if credentials.expired and credentials.refresh_token:
-        # refresh is synchronous — run in thread to avoid blocking event loop
-        await asyncio.to_thread(credentials.refresh, Request())
-        await db.users.update_one(
-            {"user_id": user_id},
-            {"$set": {
-                "access_token": credentials.token,
-                "token_expiry": credentials.expiry.isoformat() if credentials.expiry else None,
-            }},
-        )
+        try:
+            await asyncio.to_thread(credentials.refresh, Request())
+            await db.users.update_one(
+                {"user_id": user_id},
+                {"$set": {
+                    "access_token": credentials.token,
+                    "token_expiry": credentials.expiry.isoformat() if credentials.expiry else None,
+                }},
+            )
+        except Exception:
+            raise ValueError(
+                "Could not refresh your Google Calendar access token. "
+                "Please log out and log back in to reconnect your calendar."
+            )
 
     # build() is synchronous — run in thread
     return await asyncio.to_thread(build, "calendar", "v3", credentials=credentials)
@@ -91,7 +153,7 @@ def build_calendar_tools(user_id: str) -> list:
             start_dt = parse_dt(start) or datetime.now(timezone.utc)
             end_dt = parse_dt(end) or (start_dt + timedelta(days=1))
 
-            result = await asyncio.to_thread(
+            result = await call_with_retry(
                 lambda: service.events().list(
                     calendarId="primary",
                     timeMin=start_dt.isoformat(),
@@ -103,12 +165,17 @@ def build_calendar_tools(user_id: str) -> list:
 
             events = result.get("items", [])
             if not events:
-                return "No events found in this time range."
-
+                return (
+                    "No events found in this time range. "
+                    "If you were looking for a specific event to update or delete, "
+                    "try a broader date range."
+                )
             return f"Found {len(events)} event(s):\n\n" + "\n---\n".join(fmt_event(e) for e in events)
 
+        except (ValueError, PermissionError, LookupError, RuntimeError) as e:
+            return f"Error: {str(e)}"
         except Exception as e:
-            return f"Error listing events: {str(e)}"
+            return f"Unexpected error listing events: {str(e)}"
 
     @tool
     async def create_event(
@@ -134,7 +201,10 @@ def build_calendar_tools(user_id: str) -> list:
             end_dt = parse_dt(end)
 
             if not start_dt or not end_dt:
-                return "Could not parse the dates provided. Please be more specific."
+                return (
+                    "Could not parse the dates provided. "
+                    "Please use a specific format like 'tomorrow at 3pm' or '2024-01-15 at 14:00'."
+                )
 
             body: dict = {
                 "summary": title,
@@ -147,7 +217,7 @@ def build_calendar_tools(user_id: str) -> list:
                 emails = [e.strip() for e in attendee_emails.split(",") if e.strip()]
                 body["attendees"] = [{"email": email} for email in emails]
 
-            created = await asyncio.to_thread(
+            created = await call_with_retry(
                 lambda: service.events().insert(
                     calendarId="primary",
                     body=body,
@@ -157,8 +227,10 @@ def build_calendar_tools(user_id: str) -> list:
 
             return f"Event created successfully!\n{fmt_event(created)}"
 
+        except (ValueError, PermissionError, LookupError, RuntimeError) as e:
+            return f"Error: {str(e)}"
         except Exception as e:
-            return f"Error creating event: {str(e)}"
+            return f"Unexpected error creating event: {str(e)}"
 
     @tool
     async def update_event(
@@ -180,7 +252,7 @@ def build_calendar_tools(user_id: str) -> list:
         try:
             service = await get_calendar_service(user_id)
 
-            event = await asyncio.to_thread(
+            event = await call_with_retry(
                 lambda: service.events().get(calendarId="primary", eventId=event_id).execute()
             )
 
@@ -197,18 +269,19 @@ def build_calendar_tools(user_id: str) -> list:
                 if end_dt:
                     event["end"] = {"dateTime": end_dt.isoformat()}
 
-            updated = await asyncio.to_thread(
+            updated = await call_with_retry(
                 lambda: service.events().update(
                     calendarId="primary",
                     eventId=event_id,
                     body=event,
                 ).execute()
             )
-
             return f"Event updated successfully!\n{fmt_event(updated)}"
 
+        except (ValueError, PermissionError, LookupError, RuntimeError) as e:
+            return f"Error: {str(e)}"
         except Exception as e:
-            return f"Error updating event: {str(e)}"
+            return f"Unexpected error updating event: {str(e)}"
 
     @tool
     async def delete_event(event_id: str) -> str:
@@ -220,14 +293,16 @@ def build_calendar_tools(user_id: str) -> list:
         try:
             service = await get_calendar_service(user_id)
 
-            await asyncio.to_thread(
+            await call_with_retry(
                 lambda: service.events().delete(calendarId="primary", eventId=event_id).execute()
             )
 
             return f"Event {event_id} deleted successfully."
 
+        except (ValueError, PermissionError, LookupError, RuntimeError) as e:
+            return f"Error: {str(e)}"
         except Exception as e:
-            return f"Error deleting event: {str(e)}"
+            return f"Unexpected error deleting event: {str(e)}"
 
     @tool
     async def check_freebusy(emails: str, start: str, end: str) -> str:
@@ -247,7 +322,7 @@ def build_calendar_tools(user_id: str) -> list:
 
             email_list = [e.strip() for e in emails.split(",") if e.strip()]
 
-            result = await asyncio.to_thread(
+            result = await call_with_retry(
                 lambda: service.freebusy().query(body={
                     "timeMin": start_dt.isoformat(),
                     "timeMax": end_dt.isoformat(),
@@ -266,7 +341,9 @@ def build_calendar_tools(user_id: str) -> list:
 
             return "\n".join(output) or "No availability data found."
 
+        except (ValueError, PermissionError, LookupError, RuntimeError) as e:
+            return f"Error: {str(e)}"
         except Exception as e:
-            return f"Error checking availability: {str(e)}"
+            return f"Unexpected error checking availability: {str(e)}"
 
     return [list_events, create_event, update_event, delete_event, check_freebusy]

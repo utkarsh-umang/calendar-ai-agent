@@ -4,7 +4,7 @@ Test suite for the Calendar Agent.
 Each test case defines:
 - id: unique identifier
 - description: what's being tested
-- category: baseline / memory / edge_case
+- category: baseline / memory / edge_case / error_handling
 - setup: dict of DB state to insert before running (None if no setup needed)
 - message: the user message to send to the agent
 - scorer: which scoring method to use
@@ -77,7 +77,7 @@ TEST_CASES = [
         "expected": {
             "collection": "profiles",
             "field": "constraints",
-            "contains": "sunday",   # case-insensitive substring match
+            "contains": "sunday",
         },
     },
     {
@@ -101,5 +101,34 @@ TEST_CASES = [
         "message": "Move my meeting",
         "scorer": "llm_judge",
         "expected": "The agent should ask for clarification — which meeting and to when — rather than guessing or throwing an error.",
+    },
+
+    # ── Error handling ─────────────────────────────────────────────────────────
+
+    {
+        "id": "TC9",
+        "description": "Agent self-corrects when given a nonexistent event ID",
+        "category": "error_handling",
+        "setup": None,
+        "message": "Update event with ID 'fake-nonexistent-id-999' to start at 5pm",
+        "scorer": "llm_judge",
+        "expected": (
+            "The agent should not give up silently after the 404 error. "
+            "It should either call list_events to find the correct event, "
+            "or clearly explain that the event was not found and ask the user to clarify which event they meant."
+        ),
+    },
+    {
+        "id": "TC10",
+        "description": "Agent handles completely unparseable date gracefully",
+        "category": "error_handling",
+        "setup": None,
+        "message": "Schedule a meeting on blahblah at xyztime",
+        "scorer": "llm_judge",
+        "expected": (
+            "The agent should not crash or return a raw error string. "
+            "It should tell the user the date could not be understood "
+            "and ask them to provide a clearer date and time."
+        ),
     },
 ]
