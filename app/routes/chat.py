@@ -1,27 +1,23 @@
 from fastapi import APIRouter, Request
 from fastapi.responses import JSONResponse
 from jose import jwt, JWTError
-from pydantic import BaseModel
 
 from app.config import settings
 from app.agent.graph import run_agent
 from app.db.mongo import db
+from app.models.models import ChatRequest, ChatResponse, SessionPayload
 
 router = APIRouter()
 
 
-class ChatRequest(BaseModel):
-    message: str
-    session_id: str = "default"
-
-
-def get_user_from_cookie(request: Request) -> dict | None:
+def get_user_from_cookie(request: Request) -> SessionPayload | None:
     session = request.cookies.get("session")
     if not session:
         return None
     try:
-        return jwt.decode(session, settings.SECRET_KEY, algorithms=["HS256"])
-    except JWTError:
+        payload = jwt.decode(session, settings.SECRET_KEY, algorithms=["HS256"])
+        return SessionPayload.model_validate(payload)
+    except (JWTError, Exception):
         return None
 
 
@@ -33,11 +29,13 @@ async def chat(request: Request, body: ChatRequest):
 
     try:
         response = await run_agent(
-            user_id=user["user_id"],
+            user_id=user.user_id,
             session_id=body.session_id,
             message=body.message,
         )
-        return JSONResponse({"response": response, "session_id": body.session_id})
+        return JSONResponse(
+            ChatResponse(response=response, session_id=body.session_id).model_dump()
+        )
 
     except Exception as e:
         return JSONResponse({"error": f"Agent error: {str(e)}"}, status_code=500)
@@ -50,7 +48,7 @@ async def get_history(request: Request, session_id: str):
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
 
     doc = await db.conversations.find_one({
-        "user_id": user["user_id"],
+        "user_id": user.user_id,
         "session_id": session_id,
     })
 

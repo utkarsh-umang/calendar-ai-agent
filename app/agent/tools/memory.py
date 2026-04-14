@@ -1,5 +1,7 @@
-from app.db.mongo import db
 from langchain_core.tools import tool
+
+from app.db.mongo import db
+from app.models.models import Contact, ProfileRule
 
 
 def build_memory_tools(user_id: str) -> list:
@@ -18,9 +20,10 @@ def build_memory_tools(user_id: str) -> list:
             constraint: The rule to save (e.g. 'never schedule before 10am')
         """
         try:
+            rule = ProfileRule(rule=constraint, source="explicit")
             await db.profiles.update_one(
                 {"user_id": user_id},
-                {"$addToSet": {"constraints": {"rule": constraint, "source": "explicit"}}},
+                {"$addToSet": {"constraints": rule.model_dump()}},
                 upsert=True,
             )
             return f"Constraint saved: '{constraint}'"
@@ -37,9 +40,10 @@ def build_memory_tools(user_id: str) -> list:
             preference: The preference to save
         """
         try:
+            rule = ProfileRule(rule=preference, source="explicit")
             await db.profiles.update_one(
                 {"user_id": user_id},
-                {"$addToSet": {"preferences": {"rule": preference, "source": "explicit"}}},
+                {"$addToSet": {"preferences": rule.model_dump()}},
                 upsert=True,
             )
             return f"Preference saved: '{preference}'"
@@ -56,6 +60,7 @@ def build_memory_tools(user_id: str) -> list:
             email: Contact's email address
         """
         try:
+            contact = Contact(name=name, email=email)
             # remove existing entry with same name to avoid duplicates
             await db.contacts.update_one(
                 {"user_id": user_id},
@@ -63,10 +68,10 @@ def build_memory_tools(user_id: str) -> list:
             )
             await db.contacts.update_one(
                 {"user_id": user_id},
-                {"$push": {"contacts": {"name": name, "email": email}}},
+                {"$push": {"contacts": contact.model_dump()}},
                 upsert=True,
             )
-            return f"Contact saved: {name} → {email}"
+            return f"Contact saved: {contact.name} → {contact.email}"
         except Exception as e:
             return f"Error saving contact: {str(e)}"
 

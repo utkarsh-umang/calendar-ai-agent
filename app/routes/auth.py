@@ -7,6 +7,7 @@ from jose import jwt, JWTError
 
 from app.config import settings
 from app.db.mongo import db
+from app.models.models import UserDoc
 from app.routes.chat import get_user_from_cookie
 
 router = APIRouter()
@@ -63,19 +64,19 @@ async def callback(request: Request):
         )
     user_data = resp.json()
 
-    user_doc = {
-        "user_id": user_data["id"],
-        "email": user_data["email"],
-        "name": user_data["name"],
-        "picture": user_data.get("picture", ""),
-        "access_token": credentials.token,
-        "refresh_token": credentials.refresh_token,
-        "token_expiry": credentials.expiry.isoformat() if credentials.expiry else None,
-    }
+    user_doc = UserDoc(
+        user_id=user_data["id"],
+        email=user_data["email"],
+        name=user_data["name"],
+        picture=user_data.get("picture", ""),
+        access_token=credentials.token,
+        refresh_token=credentials.refresh_token,
+        token_expiry=credentials.expiry.isoformat() if credentials.expiry else None,
+    )
 
     await db.users.update_one(
-        {"user_id": user_data["id"]},
-        {"$set": user_doc},
+        {"user_id": user_doc.user_id},
+        {"$set": user_doc.model_dump()},
         upsert=True,
     )
 
@@ -139,7 +140,7 @@ async def avatar(request: Request):
     if not user:
         return JSONResponse({"error": "Not authenticated"}, status_code=401)
     
-    db_user = await db.users.find_one({"user_id": user["user_id"]})
+    db_user = await db.users.find_one({"user_id": user.user_id})
     picture_url = db_user.get("picture", "")
     if not picture_url:
         return JSONResponse({"error": "No avatar"}, status_code=404)

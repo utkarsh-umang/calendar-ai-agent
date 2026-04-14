@@ -146,12 +146,12 @@ Let me know if you need anything else!
 **Agent response:**
 > The event with ID 'fake-nonexistent-id-999' does not exist. Here are the events I found for today:
 
-1. **Interview with Nanonets**
+1. **Meeting Call**
    - Start: 3:30 PM
    - End: 4:00 PM
-   - Attendees: utk.umang@gmail.com, schedule@flax.greenhouse.io
+   - Attendees: utk.umang@gmail.com, aditya@gmail.com
 
-2. **AI Fundamental Round - Utkarsh Umang - AI Engineer – AI Agen...
+2. **Work Updates - Utkarsh Umang <> Aditya ...
 
 **Score reason:** PASS: The agent clearly informs the user that the event ID does not exist and provides a list of today's events to help the user identify the correct one.
 

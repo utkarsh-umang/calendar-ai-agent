@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from app.db.mongo import db
+from app.models.models import ContactsDoc, UserProfile
 
 
 async def load_user_context(user_id: str) -> str:
@@ -9,25 +10,26 @@ async def load_user_context(user_id: str) -> str:
     Returns a formatted string that gets injected into the system prompt
     so the agent knows the user's rules and contacts before it reasons.
     """
-    profile = await db.profiles.find_one({"user_id": user_id}) or {}
-    contacts_doc = await db.contacts.find_one({"user_id": user_id}) or {}
+    raw_profile = await db.profiles.find_one({"user_id": user_id}) or {}
+    raw_contacts = await db.contacts.find_one({"user_id": user_id}) or {}
 
-    constraints = profile.get("constraints", [])
-    preferences = profile.get("preferences", [])
-    contacts = contacts_doc.get("contacts", [])
+    profile = UserProfile.model_validate({**raw_profile, "user_id": user_id})
+    contacts_doc = ContactsDoc.model_validate({**raw_contacts, "user_id": user_id})
 
     parts = []
 
-    if constraints:
-        rules = "\n".join(f"  - {c['rule']}" for c in constraints)
+    if profile.constraints:
+        rules = "\n".join(f"  - {c.rule}" for c in profile.constraints)
         parts.append(f"HARD RULES — never violate these:\n{rules}")
 
-    if preferences:
-        prefs = "\n".join(f"  - {p['rule']}" for p in preferences)
+    if profile.preferences:
+        prefs = "\n".join(f"  - {p.rule}" for p in profile.preferences)
         parts.append(f"SOFT PREFERENCES — apply when possible:\n{prefs}")
 
-    if contacts:
-        contact_list = "\n".join(f"  - {c['name']} → {c['email']}" for c in contacts)
+    if contacts_doc.contacts:
+        contact_list = "\n".join(
+            f"  - {c.name} → {c.email}" for c in contacts_doc.contacts
+        )
         parts.append(f"KNOWN CONTACTS:\n{contact_list}")
 
     now = datetime.now().strftime("%A, %B %d, %Y %I:%M %p")
