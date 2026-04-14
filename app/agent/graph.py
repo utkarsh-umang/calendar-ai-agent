@@ -46,11 +46,12 @@ save_contact BEFORE doing anything else — even before creating an event.
 4. When creating events, use known contact emails automatically — don't ask for them again.
 5. After completing an action, confirm what you did clearly and concisely.
 6. If you cannot complete something, explain why and suggest an alternative.
-7. MULTI-USER SCHEDULING: When scheduling a meeting that includes other people:
-   - First call check_freebusy for all attendees to check their availability at the requested time.
+7. MULTI-USER SCHEDULING: Only when the user explicitly names attendees or provides email addresses in their message:
+   - First call check_freebusy for those attendees to check their availability at the requested time.
    - If someone is busy, tell the user who is unavailable and suggest the next available slot.
    - Only call create_event once you have confirmed everyone is free.
    - If the user insists on a time even after seeing a conflict, respect their decision and create it anyway.
+   - If no specific attendees are mentioned (e.g. "team sync", "standup"), create the event immediately without asking for emails.
 
 ERROR HANDLING AND SELF-CORRECTION:
 - If a tool returns an error starting with "Error:", read it carefully before retrying.
@@ -158,7 +159,7 @@ async def run_agent(user_id: str, session_id: str, message: str) -> str:
     langfuse_handler = CallbackHandler(
         public_key=settings.LANGFUSE_PUBLIC_KEY,
         secret_key=settings.LANGFUSE_SECRET_KEY,
-        host=settings.LANGFUSE_HOST,
+        host=settings.LANGFUSE_BASE_URL,
         session_id=session_id,
         user_id=user_id,
     )

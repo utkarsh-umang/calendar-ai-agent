@@ -191,6 +191,8 @@ async def run_test(test_case: dict, user_id: str) -> dict:
             "id": test_case["id"],
             "description": test_case["description"],
             "category": test_case["category"],
+            "scorer": test_case["scorer"],
+            "message": test_case["message"],
             "score": 0,
             "reason": f"FAIL — agent threw exception: {str(e)}",
             "response": "",
