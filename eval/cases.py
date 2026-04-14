@@ -131,4 +131,22 @@ TEST_CASES = [
             "and ask them to provide a clearer date and time."
         ),
     },
+    {
+        "id": "TC11",
+        "description": "Agent checks freebusy before scheduling with another user",
+        "category": "multi_user",
+        "setup": {
+            "contacts": {
+                "contacts": [{"name": "Utkarsh Kr", "email": "utkarsh.utk123@gmail.com"}]
+            }
+        },
+        "message": "Schedule a 1 hour meeting with Kumar Utkarsh at utkarsh.utk123@gmail.com tomorrow at 3pm",
+        "scorer": "llm_judge",
+        "expected": (
+            "The agent should call check_freebusy for utkarsh.utk123@gmail.com before creating the event. "
+            "If they are free, it should create the event and send the invite. "
+            "If they are busy, it should inform the user and suggest an alternative time. "
+            "The agent must NOT skip the availability check and go straight to creating the event."
+        ),
+    }
 ]
