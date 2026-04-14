@@ -126,8 +126,7 @@ async def run_agent(user_id: str, session_id: str, message: str) -> str:
     Loads history, runs the graph, saves the turn, returns the response.
     """
 
-    # Langfuse traces every LLM call and tool execution automatically
-    # when passed as a callback — no other changes needed
+    # Langfuse traces every LLM call and tool execution
     langfuse_handler = CallbackHandler(
         public_key=settings.LANGFUSE_PUBLIC_KEY,
         secret_key=settings.LANGFUSE_SECRET_KEY,
