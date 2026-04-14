@@ -1,16 +1,21 @@
-# Calendar Agent
+# Calendar AI Agent
 
 A stateful, multi-user AI executive assistant that manages Google Calendar through natural conversation. Built with LangGraph, FastAPI, MongoDB, and Langfuse.
 
 ---
 
-## What it does
+## Capabilities
 
-- **Natural language calendar management** — list, create, update, delete events by just asking
-- **Persistent memory** — remembers your constraints ("never before 10am"), preferences ("prefer 30 min meetings"), and contacts ("Alex → alex@company.com") across sessions
-- **Multi-user scheduling** — checks availability before booking, sends Google Calendar invites
-- **Full observability** — every LLM call and tool execution traced in Langfuse
-- **Automated eval** — 11 test cases across 5 categories with a scored success rate
+| Objective | What's built |
+|---|---|
+| Calendar operations | List, create, update, delete events via natural language |
+| Multi-user scheduling | Checks freebusy availability before booking; sends Google Calendar invites |
+| Stateful architecture | Google OAuth per user; persistent sessions and memory in MongoDB |
+| Long-term memory | Remembers hard constraints, soft preferences, and contacts across sessions |
+| Rule adherence | Agent never violates stored rules — they're injected into every system prompt |
+| Observability | Every LLM call and tool execution traced in Langfuse with full span detail |
+| Error handling | Exponential backoff on transient errors; LLM self-correction on permanent ones |
+| Automated evaluation | 11 test cases across 5 categories; three scoring strategies; scored report |
 
 ---
 
@@ -49,6 +54,7 @@ app/
   routes/
     auth.py           → Google OAuth flow (/auth/login, /auth/callback)
     chat.py           → POST /chat, GET /chat/history
+  models.py           → Pydantic models for all MongoDB documents and API boundaries
   db/mongo.py         → async MongoDB connection
   static/index.html   → login page + chat UI
 eval/
@@ -210,13 +216,30 @@ LANGFUSE_HOST           → https://cloud.langfuse.com
 
 ---
 
-## Known limitations and production improvements
+## Production improvements
 
-- **Conversation summarisation** — long sessions will eventually hit context limits
-- **Semantic profile retrieval** — upfront injection doesn't scale to large user profiles
-- **Availability consent model** — users should control who can check their freebusy
-- **Automated preference extraction** — the agent currently saves preferences only when the user explicitly states them. Implicit patterns (e.g. always books 30-minute 1:1s, never schedules back-to-back meetings) go undetected. The fix is a background cron job that runs periodically per active user, takes their last ~50 conversation messages, and passes them to a reasoning LLM with a structured prompt asking it to identify recurring behavioural patterns not already in the profile. The output is a JSON list of inferred preferences with a confidence score. High-confidence results are written to a separate `inferred_preferences` field in MongoDB (distinct from explicitly stated `preferences`, so the agent can apply them with appropriate softness). The job tracks a `last_analysed_at` timestamp per user to avoid reprocessing the same history on every run, and diffs inferred results against the existing profile before writing to prevent duplicates. This closes the loop between the reactive memory layer (user says something → saved immediately) and a proactive layer (agent notices what the user never said).
-- **Token refresh edge cases** — mid-conversation token expiry is handled but not tested under load
+### Memory and learning
+
+- **Self-learning preference extraction** — the agent currently saves preferences only when the user explicitly states them. Implicit patterns (e.g. always books 30-minute 1:1s, never schedules back-to-back meetings) go undetected. The fix is a background cron job that runs periodically per active user, takes their last ~50 conversation messages, and passes them to a reasoning LLM with a structured prompt asking it to identify recurring behavioural patterns not already in the profile. The output is a JSON list of inferred preferences with a confidence score. High-confidence results are written to a separate `inferred_preferences` field in MongoDB (distinct from explicitly stated `preferences`, so the agent can apply them with appropriate softness). The job tracks a `last_analysed_at` timestamp per user to avoid reprocessing the same history on every run, and diffs inferred results against the existing profile before writing to prevent duplicates.
+
+- **Conversation summarisation** — long sessions will eventually hit context limits. A background job that compresses older turns into a rolling summary would close this gap.
+
+- **Semantic profile retrieval** — upfront context injection doesn't scale to large user profiles. The production fix is to embed the user's message and retrieve only relevant profile entries from a vector store.
+
+### Evaluation and prompt quality
+
+- **Automated prompt optimisation** — the eval pipeline currently measures failures but doesn't act on them. In production, a scheduled job would collect all eval failures from the Langfuse logs, group them by failure pattern, and send them to a reasoning LLM. That LLM would analyse why the current prompt version is causing each failure class, then produce a candidate revised prompt. The revised prompt would be pushed back into Langfuse as a new prompt version, and the eval suite would run automatically against it to confirm improvement before the version is promoted. This closes the loop between evaluation and the system prompt, turning the eval pipeline into a continuous improvement engine rather than a one-shot report.
+
 - **Tool call count validation** — the current `tool_called` scorer only checks whether the expected tool was invoked, not whether the agent called the right number of tools. A scorer that asserts an exact tool call sequence (e.g. `check_freebusy` then `create_event`, nothing more) would catch over-calling and under-calling bugs that the current eval misses.
-- **Rate limiting** — two layers are missing. At the application layer, `slowapi` middleware on the `/chat` endpoint would cap requests per user (e.g. 10/minute), preventing abuse and runaway spend before the agent even starts. At the LLM layer, routing OpenAI calls through a [LiteLLM](https://github.com/BerriAI/litellm) proxy would add per-user TPM/RPM caps, hard budget limits, and automatic fallback to a secondary model if the primary is rate-limited or unavailable.
-- **Application-level logging** — Langfuse covers LLM-layer observability (traces, token costs, tool calls) but not business-level telemetry. A dedicated logging module writing structured events (user activity, tool error rates, latencies) to a `logs` MongoDB collection, paired with a dashboard (Metabase or Grafana), would give full platform visibility. The two systems are complementary — Langfuse trace IDs can be cross-referenced in every log document.
+
+### Reliability and scaling
+
+- **Rate limiting** — two layers are missing. At the application layer, `slowapi` middleware on the `/chat` endpoint would cap requests per user (e.g. 10/minute), preventing abuse before the agent even starts. At the LLM layer, routing OpenAI calls through a [LiteLLM](https://github.com/BerriAI/litellm) proxy would add per-user TPM/RPM caps, hard budget limits, and automatic fallback to a secondary model if the primary is rate-limited or unavailable.
+
+- **Token refresh edge cases** — mid-conversation token expiry is handled but not tested under load.
+
+- **Availability consent model** — users should control who can check their freebusy, similar to Google Calendar's sharing settings.
+
+### Observability
+
+- **Application-level logging** — Langfuse covers LLM-layer observability (traces, token costs, tool calls) but not business-level telemetry. A dedicated logging module writing structured events (user activity, tool error rates, latencies) to a `logs` MongoDB collection, paired with a dashboard (Metabase or Grafana), would give full platform visibility. Langfuse trace IDs can be cross-referenced in every log document so both systems stay linked.
